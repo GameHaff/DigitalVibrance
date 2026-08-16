@@ -185,7 +185,7 @@ src/DigitalVibrance/
 Digital Vibrance is free to use. If it earned a permanent spot in your setup,
 you can buy me a coffee — entirely optional, never nagged about in the app.
 
-[![PayPal](https://img.shields.io/badge/PayPal-Buy%20me%20a%20coffee-00457C?style=for-the-badge&logo=paypal&logoColor=white)](https://www.paypal.me/SamiBeat)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/B1D324LCE3)
 
 </div>
 
