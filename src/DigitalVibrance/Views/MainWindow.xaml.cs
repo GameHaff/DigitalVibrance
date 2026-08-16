@@ -3,6 +3,11 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Input;
+using System.Windows.Media.Imaging;
+using System.Runtime.InteropServices;
 using DigitalVibrance.Localization;
 using DigitalVibrance.ViewModels;
 using Drawing = System.Drawing;
@@ -18,6 +23,22 @@ public partial class MainWindow : Window
     private readonly WinForms.ToolStripMenuItem _trayExitItem;
     private bool _exiting;
 
+    [DllImport("user32.dll")]
+    private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+    [DllImport("gdi32.dll")]
+    private static extern IntPtr CreateRoundRectRgn(
+        int nLeftRect,
+        int nTopRect,
+        int nRightRect,
+        int nBottomRect,
+        int nWidthEllipse,
+        int nHeightEllipse);
+
+    [DllImport("gdi32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DeleteObject(IntPtr hObject);
+
     public MainWindow()
     {
         InitializeComponent();
@@ -28,6 +49,19 @@ public partial class MainWindow : Window
         _trayShowItem = new WinForms.ToolStripMenuItem();
         _trayExitItem = new WinForms.ToolStripMenuItem();
         _tray = BuildTrayIcon();
+        var icon = LoadWindowIcon();
+        if (icon is not null)
+        {
+            BrandIcon.Source = icon;
+            Icon = icon;
+            BrandGlyphFallback.Visibility = Visibility.Collapsed;
+            BrandIcon.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            BrandGlyphFallback.Visibility = Visibility.Visible;
+            BrandIcon.Visibility = Visibility.Collapsed;
+        }
 
         // The tray menu lives outside WPF's binding system, so it is refreshed by hand.
         Loc.Instance.LanguageChanged += OnLanguageChanged;
@@ -35,11 +69,54 @@ public partial class MainWindow : Window
 
         if (!_vm.EngineAvailable)
         {
-            Loaded += (_, _) => MessageBox.Show(this,
+        }
+
+        Loaded += OnLoaded;
+        SizeChanged += OnWindowSizeChanged;
+    }
+
+    protected override void OnSourceInitialized(EventArgs e)
+    {
+        base.OnSourceInitialized(e);
+        ApplyWindowRegion();
+    }
+
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        if (!_vm.EngineAvailable)
+        {
+            MessageBox.Show(this,
                 Loc.Instance["EngineFailedBody"] + "\n\n" + _vm.EngineError,
                 "Digital Vibrance", MessageBoxButton.OK, MessageBoxImage.Warning,
                 MessageBoxResult.OK, Loc.Instance.DialogOptions);
         }
+
+        ApplyStartupVisibility();
+        ApplyWindowRegion();
+    }
+
+    private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e) => ApplyWindowRegion();
+
+    private void ApplyWindowRegion()
+    {
+        if (!IsLoaded) return;
+
+        var helper = new WindowInteropHelper(this);
+        var hWnd = helper.Handle;
+        if (hWnd == IntPtr.Zero) return;
+
+        var dpi = VisualTreeHelper.GetDpi(this);
+        var width = (int)Math.Round(ActualWidth * dpi.DpiScaleX);
+        var height = (int)Math.Round(ActualHeight * dpi.DpiScaleY);
+        var radius = (int)Math.Round(16.0 * dpi.DpiScaleX);
+
+        if (width <= 0 || height <= 0 || radius <= 0) return;
+
+        IntPtr region = CreateRoundRectRgn(0, 0, width + 1, height + 1, radius * 2, radius * 2);
+        if (region == IntPtr.Zero) return;
+
+        SetWindowRgn(hWnd, region, true);
+        DeleteObject(region);
     }
 
     // ---------- tray ----------
@@ -92,6 +169,100 @@ public partial class MainWindow : Window
         return Drawing.SystemIcons.Application;
     }
 
+    private static ImageSource? LoadWindowIcon()
+    {
+        try
+        {
+            if (TryGetEmbeddedIcon() is { } embedded)
+            {
+                return embedded;
+            }
+
+            var iconPath = TryGetPackagedIconPath();
+            if (iconPath is not null && TryGetIconBitmap(iconPath, 48) is { } bitmapIcon)
+            {
+                return bitmapIcon;
+            }
+
+            using var icon = LoadAppIcon();
+            return Imaging.CreateBitmapSourceFromHIcon(
+                icon.Handle,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromWidthAndHeight(32, 32));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void OnBrandIconFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        BrandGlyphFallback.Visibility = Visibility.Visible;
+        BrandIcon.Visibility = Visibility.Collapsed;
+    }
+
+    private static ImageSource? TryGetIconBitmap(string iconPath, int size)
+    {
+        try
+        {
+            using var icon = new Drawing.Icon(iconPath, size, size);
+            var bitmap = Imaging.CreateBitmapSourceFromHIcon(
+                icon.Handle,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromWidthAndHeight(size, size));
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ImageSource? TryGetEmbeddedIcon()
+    {
+        try
+        {
+            var uri = new Uri("pack://application:,,,/DigitalVibrance;component/Assets/app.ico");
+            using var stream = Application.GetResourceStream(uri)?.Stream;
+            if (stream is null) return null;
+
+            using var icon = new Drawing.Icon(stream);
+            var bitmap = Imaging.CreateBitmapSourceFromHIcon(
+                icon.Handle,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromWidthAndHeight(48, 48));
+            bitmap.Freeze();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetPackagedIconPath()
+    {
+        var candidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, "Assets", "app.ico"),
+            Path.Combine(AppContext.BaseDirectory, "app.ico"),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app.ico"),
+            Path.Combine(Directory.GetCurrentDirectory(), "Assets", "app.ico"),
+            Path.Combine(Directory.GetCurrentDirectory(), "src", "DigitalVibrance", "Assets", "app.ico"),
+            Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Assets", "app.ico")),
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "DigitalVibrance", "Assets", "app.ico"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (File.Exists(candidate)) return candidate;
+        }
+
+        return null;
+    }
+
     private void RestoreFromTray()
     {
         Show();
@@ -106,20 +277,22 @@ public partial class MainWindow : Window
     }
 
     // ---------- window chrome ----------
+    private void OnTitleBarMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        try
+        {
+            DragMove();
+        }
+        catch
+        {
+            // Ignore cases where drag is not supported (e.g. while minimized).
+        }
+    }
 
     private void OnMinimize(object sender, RoutedEventArgs e) => WindowState = WindowState.Minimized;
 
-    private void OnMaximizeRestore(object sender, RoutedEventArgs e) =>
-        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
-
     private void OnClose(object sender, RoutedEventArgs e) => Close();
-
-    protected override void OnStateChanged(EventArgs e)
-    {
-        base.OnStateChanged(e);
-        // E922 = maximize glyph, E923 = restore glyph
-        MaximizeButton.Content = WindowState == WindowState.Maximized ? "" : "";
-    }
 
     protected override void OnClosing(CancelEventArgs e)
     {
@@ -168,4 +341,18 @@ public partial class MainWindow : Window
             .Where(p => string.Equals(Path.GetExtension(p), ".exe", StringComparison.OrdinalIgnoreCase))
             .ToArray();
     }
+
+    private void ApplyStartupVisibility()
+    {
+        if (!_vm.StartMinimized) return;
+
+        if (_vm.MinimizeToTray)
+        {
+            Hide();
+            return;
+        }
+
+        WindowState = WindowState.Minimized;
+    }
+
 }

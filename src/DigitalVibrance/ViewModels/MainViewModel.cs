@@ -34,10 +34,12 @@ public sealed class MainViewModel : ObservableObject, IDisposable
     private readonly AppConfig _config;
     private readonly VibranceEngine _engine;
     private readonly GameWatcher _watcher;
+    private readonly StartupLaunchService _startupLaunchService;
     private readonly DispatcherTimer _saveTimer;
 
     private GameProfile? _selectedGame;
     private bool _livePreview = true;
+    private bool _startWithWindows;
     private bool _isLanguageMenuOpen;
     private StatusKind _status = StatusKind.NoProfiles;
     private string? _detailKey;
@@ -58,6 +60,21 @@ public sealed class MainViewModel : ObservableObject, IDisposable
         _engine = new VibranceEngine();
         _watcher = new GameWatcher();
         _watcher.Changed += (_, _) => Reevaluate();
+        _startupLaunchService = new StartupLaunchService();
+
+        _startWithWindows = _startupLaunchService.IsEnabled();
+        if (_config.StartWithWindows != _startWithWindows)
+        {
+            if (!_startupLaunchService.SetEnabled(_config.StartWithWindows))
+            {
+                _startWithWindows = _startupLaunchService.IsEnabled();
+            }
+        }
+        if (_config.StartWithWindows != _startWithWindows)
+        {
+            _config.StartWithWindows = _startWithWindows;
+            ScheduleSave();
+        }
 
         Games = new ObservableCollection<GameProfile>(_config.Games);
         foreach (var game in Games)
@@ -171,6 +188,39 @@ public sealed class MainViewModel : ObservableObject, IDisposable
             Raise();
             ScheduleSave();
             Reevaluate();
+        }
+    }
+
+    public bool StartWithWindows
+    {
+        get => _startWithWindows;
+        set
+        {
+            if (_startWithWindows == value) return;
+
+            if (_startupLaunchService.SetEnabled(value))
+            {
+                _startWithWindows = value;
+                _config.StartWithWindows = value;
+                Raise();
+                ScheduleSave();
+                return;
+            }
+
+            _startWithWindows = _startupLaunchService.IsEnabled();
+            Raise();
+        }
+    }
+
+    public bool StartMinimized
+    {
+        get => _config.StartMinimized;
+        set
+        {
+            if (_config.StartMinimized == value) return;
+            _config.StartMinimized = value;
+            Raise();
+            ScheduleSave();
         }
     }
 

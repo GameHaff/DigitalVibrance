@@ -19,6 +19,8 @@ public sealed class AppConfig
 
     public bool StartMinimized { get; set; }
 
+    public bool StartWithWindows { get; set; }
+
     /// <summary>ISO code of the chosen language. Null means "follow the OS display language".</summary>
     public string? Language { get; set; }
 

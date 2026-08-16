@@ -12,6 +12,12 @@
     "WinClose": "Close",
     "LanguageTip": "Change language",
     "ThemeTip": "Switch between light and dark",
+    "SectionGeneral": "GENERAL",
+    "GeneralHint": "App behavior and startup preferences.",
+    "StartupTitle": "Start with Windows",
+    "StartupHint": "Automatically launch when Windows starts.",
+    "StartupMinimizeTitle": "Start minimized",
+    "StartupMinimizeHint": "Hide the main window on launch and keep running from the tray.",
 
     "GamesTitle": "Games",
     "GamesAdd": "Add game",
